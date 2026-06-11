@@ -119,6 +119,7 @@ export interface ScheduleActions {
   reset: () => void;
   tick: (deltaSeconds: number) => void;
   setPlaybackSpeed: (speed: number) => void;
+  seekTo: (elapsedSeconds: number) => void;
 }
 
 export {

@@ -353,6 +353,32 @@ export const useScheduleStore = create<Store>((set, get) => ({
   setPlaybackSpeed: (speed: number) => {
     set({ playbackSpeed: speed });
   },
+
+  seekTo: (targetElapsedSeconds: number) => {
+    const state = get();
+    if (state.columns.length === 0) return;
+    if (state.status === 'idle') return;
+
+    const sorted = [...state.columns].sort((a, b) => a.order - b.order);
+    const totalSeconds = calculateTotalSeconds(state.columns, state.gapMinutes);
+    const clampedElapsed = Math.max(0, Math.min(targetElapsedSeconds, totalSeconds));
+    const pos = computePlaybackPosition(sorted, state.gapMinutes, clampedElapsed);
+
+    const newStatus = pos.isFinished
+      ? 'finished'
+      : state.status === 'playing'
+        ? 'paused'
+        : state.status;
+
+    set({
+      elapsedSeconds: clampedElapsed,
+      currentColumnIndex: pos.currentColumnIndex,
+      currentColumnElapsedSeconds: pos.currentColumnElapsedSeconds,
+      currentGapElapsedSeconds: pos.currentGapElapsedSeconds,
+      inGap: pos.inGap,
+      status: newStatus,
+    });
+  },
 }));
 
 export function useScheduleTotalSeconds(): number {

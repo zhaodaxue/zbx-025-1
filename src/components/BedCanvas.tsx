@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useScheduleStore } from '@/store/scheduler';
-import { Plus, X, GripVertical, Flame, AlertTriangle } from 'lucide-react';
+import { Plus, X, GripVertical, Flame, AlertTriangle, Clock } from 'lucide-react';
 
 function burnMinutesToHeight(minutes: number): number {
   const MIN_H = 60;
@@ -9,6 +9,16 @@ function burnMinutesToHeight(minutes: number): number {
   const MAX_M = 45;
   const clamped = Math.max(MIN_M, Math.min(MAX_M, minutes));
   return MIN_H + ((clamped - MIN_M) / (MAX_M - MIN_M)) * (MAX_H - MIN_H);
+}
+
+function formatGapTime(seconds: number): string {
+  const clamped = Math.max(0, seconds);
+  const m = Math.floor(clamped / 60);
+  const s = Math.floor(clamped % 60);
+  if (m > 0) {
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
+  return `${s}s`;
 }
 
 interface ColumnCardProps {
@@ -24,6 +34,8 @@ interface ColumnCardProps {
   isCurrentColumn: boolean;
   inGap: boolean;
   isSelected: boolean;
+  burnRemainingRatio: number;
+  isFullyBurned: boolean;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void;
   onDragStart: (e: React.DragEvent, index: number) => void;
@@ -38,14 +50,19 @@ function ColumnCard({
   isCurrentColumn,
   inGap,
   isSelected,
+  burnRemainingRatio,
+  isFullyBurned,
   onSelect,
   onRemove,
   onDragStart,
   onDragOver,
   onDragEnd,
 }: ColumnCardProps) {
-  const height = burnMinutesToHeight(column.burnMinutes);
+  const fullHeight = burnMinutesToHeight(column.burnMinutes);
+  const ASH_HEIGHT = 20;
+
   const canDrag = !isPlaying;
+  const isActive = isCurrentColumn && !inGap;
 
   return (
     <div
@@ -72,38 +89,75 @@ function ColumnCard({
 
       <div
         className={`
-          relative rounded-t-md rounded-b-sm w-14 transition-all duration-300
+          relative rounded-t-md rounded-b-sm w-14 transition-all duration-200 ease-linear
           ${isSelected ? 'ring-2 ring-amber-500 ring-offset-2 ring-offset-[#FFF8F0]' : ''}
-          ${isCurrentColumn && !inGap ? 'ring-2 ring-orange-500 ring-offset-2 ring-offset-[#FFF8F0]' : ''}
+          ${isActive ? 'ring-2 ring-orange-500 ring-offset-2 ring-offset-[#FFF8F0]' : ''}
         `}
-        style={{ height: `${height}px` }}
+        style={{ height: `${fullHeight}px` }}
       >
         <div
-          className={`
-            absolute inset-0 rounded-t-md rounded-b-sm
-            bg-gradient-to-b from-[#B85C38] to-[#D4885A]
-            transition-shadow duration-300
-            ${isCurrentColumn && !inGap ? 'shadow-[0_0_20px_4px_rgba(255,120,30,0.5)]' : ''}
-          `}
-        />
-
-        {isCurrentColumn && !inGap && (
+          className="absolute left-0 right-0 bottom-0 rounded-b-sm"
+          style={{
+            height: `${ASH_HEIGHT}px`,
+            background: isFullyBurned
+              ? 'linear-gradient(to top, #5D4037, #8D6E63)'
+              : 'linear-gradient(to top, #5D4037, #A1887F)',
+          }}
+        >
           <div
-            className="absolute -top-1 left-1/2 -translate-x-1/2 w-6 h-6 rounded-full animate-pulse"
+            className="absolute inset-0 opacity-60"
             style={{
+              backgroundImage:
+                'repeating-linear-gradient(0deg, transparent 0px, transparent 3px, rgba(0,0,0,0.1) 3px, rgba(0,0,0,0.1) 4px)',
+            }}
+          />
+        </div>
+
+        {!isFullyBurned && burnRemainingRatio > 0 && (
+          <div
+            className={`
+              absolute left-0 right-0 rounded-t-md
+              transition-all duration-200 ease-linear
+              ${isActive ? 'shadow-[0_0_20px_4px_rgba(255,120,30,0.5)]' : ''}
+            `}
+            style={{
+              bottom: `${ASH_HEIGHT}px`,
+              height: `${(fullHeight - ASH_HEIGHT) * burnRemainingRatio}px`,
+              background: isActive
+                ? 'linear-gradient(to top, #E65100, #FF8F00, #FFB300)'
+                : 'linear-gradient(to top, #B85C38, #D4885A, #E8B960)',
+            }}
+          />
+        )}
+
+        {isActive && burnRemainingRatio > 0 && (
+          <div
+            className="absolute left-1/2 -translate-x-1/2 w-6 h-6 rounded-full animate-pulse"
+            style={{
+              bottom: `${ASH_HEIGHT + (fullHeight - ASH_HEIGHT) * burnRemainingRatio - 6}px`,
               background:
                 'radial-gradient(circle, rgba(255,180,50,0.9) 0%, rgba(255,100,20,0.6) 40%, transparent 70%)',
             }}
           />
         )}
 
-        {isCurrentColumn && !inGap && (
-          <Flame className="absolute top-1 left-1/2 -translate-x-1/2 w-4 h-4 text-yellow-300 animate-pulse drop-shadow-[0_0_4px_rgba(255,200,0,0.8)]" />
+        {isActive && burnRemainingRatio > 0 && (
+          <Flame
+            className="absolute left-1/2 -translate-x-1/2 w-4 h-4 text-yellow-300 animate-pulse drop-shadow-[0_0_4px_rgba(255,200,0,0.8)]"
+            style={{
+              bottom: `${ASH_HEIGHT + (fullHeight - ASH_HEIGHT) * burnRemainingRatio - 2}px`,
+            }}
+          />
         )}
 
-        <div className="absolute bottom-1.5 left-0 right-0 text-center">
+        <div
+          className={`absolute left-0 right-0 text-center transition-opacity duration-200 ${
+            isFullyBurned ? 'opacity-50' : 'opacity-100'
+          }`}
+          style={{ bottom: '4px' }}
+        >
           <span className="text-[10px] font-semibold text-white/90 drop-shadow-sm">
-            {column.burnMinutes}分钟
+            {isFullyBurned ? '燃尽' : `${column.burnMinutes}分钟`}
           </span>
         </div>
       </div>
@@ -145,6 +199,8 @@ export default function BedCanvas() {
   const columns = useScheduleStore((s) => s.columns);
   const status = useScheduleStore((s) => s.status);
   const currentColumnIndex = useScheduleStore((s) => s.currentColumnIndex);
+  const currentColumnElapsedSeconds = useScheduleStore((s) => s.currentColumnElapsedSeconds);
+  const currentGapElapsedSeconds = useScheduleStore((s) => s.currentGapElapsedSeconds);
   const inGap = useScheduleStore((s) => s.inGap);
   const gapMinutes = useScheduleStore((s) => s.gapMinutes);
   const addColumn = useScheduleStore((s) => s.addColumn);
@@ -159,6 +215,24 @@ export default function BedCanvas() {
   const sorted = [...columns].sort((a, b) => a.order - b.order);
   const isPlaying = status === 'playing';
   const canAdd = sorted.length < 4;
+  const showBurnProgress = status !== 'idle';
+
+  const getBurnRemainingRatio = (index: number): number => {
+    if (!showBurnProgress) return 1;
+    if (index < currentColumnIndex) return 0;
+    if (index > currentColumnIndex) return 1;
+    if (inGap) return 0;
+    const burnSeconds = sorted[index].burnMinutes * 60;
+    if (burnSeconds === 0) return 0;
+    return 1 - currentColumnElapsedSeconds / burnSeconds;
+  };
+
+  const isFullyBurned = (index: number): boolean => {
+    if (!showBurnProgress) return false;
+    if (index < currentColumnIndex) return true;
+    if (index === currentColumnIndex && inGap) return true;
+    return false;
+  };
 
   const handleDragStart = (e: React.DragEvent, index: number) => {
     if (isPlaying) return;
@@ -219,6 +293,17 @@ export default function BedCanvas() {
           <React.Fragment key={col.id}>
             {index > 0 && (
               <div className="flex flex-col items-center justify-end pb-2 self-end min-w-[40px]">
+                {showBurnProgress && inGap && currentColumnIndex === index - 1 && (
+                  <div
+                    className="flex items-center gap-1 mb-1 px-2 py-0.5 rounded-full animate-pulse"
+                    style={{ background: '#FFF3E0', border: '1px solid #FFB74D' }}
+                  >
+                    <Clock size={10} style={{ color: '#E65100' }} />
+                    <span className="text-[10px] font-bold" style={{ color: '#E65100' }}>
+                      {formatGapTime(gapMinutes * 60 - currentGapElapsedSeconds)}
+                    </span>
+                  </div>
+                )}
                 <div className={`w-8 border-t border-dashed mb-1 ${col.isGapWarning ? 'border-[#F1C40F]' : 'border-[#D4A574]/50'}`} />
                 <span className={`text-[9px] font-medium whitespace-nowrap ${col.isGapWarning ? 'text-[#F1C40F]' : 'text-amber-700/50'}`}>
                   {dropTargetIndex !== null && dragFromIndex !== null && (
@@ -248,6 +333,8 @@ export default function BedCanvas() {
               isCurrentColumn={status !== 'idle' && status !== 'finished' && currentColumnIndex === index}
               inGap={inGap}
               isSelected={selectedId === col.id}
+              burnRemainingRatio={getBurnRemainingRatio(index)}
+              isFullyBurned={isFullyBurned(index)}
               onSelect={setSelectedId}
               onRemove={removeColumn}
               onDragStart={handleDragStart}

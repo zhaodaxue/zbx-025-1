@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useState } from 'react';
 import { useScheduleStore, useScheduleTotalSeconds } from '@/store/scheduler';
 import { Play, Pause, RotateCcw, FastForward, Printer } from 'lucide-react';
 import type { Warning } from '@/store/types';
@@ -39,10 +39,15 @@ export default function TimelinePlayer() {
   const resumePlaying = useScheduleStore((s) => s.resumePlaying);
   const reset = useScheduleStore((s) => s.reset);
   const setPlaybackSpeed = useScheduleStore((s) => s.setPlaybackSpeed);
+  const seekTo = useScheduleStore((s) => s.seekTo);
 
   const totalSeconds = useScheduleTotalSeconds();
   const rafRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const canSeek = status === 'paused' || status === 'finished' || status === 'playing';
 
   const animate = useCallback(
     (timestamp: number) => {
@@ -107,6 +112,46 @@ export default function TimelinePlayer() {
 
   const speeds = [1, 2, 4];
 
+  const calculateElapsedFromEvent = useCallback(
+    (clientX: number): number => {
+      if (!timelineRef.current || totalSeconds === 0) return 0;
+      const rect = timelineRef.current.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      return ratio * totalSeconds;
+    },
+    [totalSeconds],
+  );
+
+  const handleTimelineMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (!canSeek) return;
+      e.preventDefault();
+      setIsDragging(true);
+      seekTo(calculateElapsedFromEvent(e.clientX));
+    },
+    [canSeek, calculateElapsedFromEvent, seekTo],
+  );
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      seekTo(calculateElapsedFromEvent(e.clientX));
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging, calculateElapsedFromEvent, seekTo]);
+
   return (
     <div className="w-full space-y-5 p-5 rounded-xl" style={{ background: '#2C1810' }}>
       <style>{`
@@ -139,7 +184,11 @@ export default function TimelinePlayer() {
             ))}
         </div>
 
-        <div className="relative">
+        <div
+          ref={timelineRef}
+          className={`relative ${canSeek ? 'cursor-pointer' : 'cursor-default'}`}
+          onMouseDown={handleTimelineMouseDown}
+        >
           <div
             className="relative h-10 rounded-lg overflow-hidden"
             style={{ background: '#3E2723' }}
@@ -178,18 +227,29 @@ export default function TimelinePlayer() {
             })}
           </div>
 
-          {status !== 'idle' && progressPercent > 0 && (
+          {status !== 'idle' && (
             <div
-              className="absolute top-0 h-10 z-10 pointer-events-none"
+              className={`absolute top-0 h-10 z-10 ${isDragging || canSeek ? 'cursor-grab active:cursor-grabbing' : 'pointer-events-none'}`}
               style={{
                 left: `${progressPercent}%`,
-                width: '3px',
+                width: '6px',
                 background: '#F4D03F',
-                boxShadow: '0 0 8px 2px rgba(244, 208, 63, 0.7)',
-                transform: 'translateX(-1.5px)',
-                borderRadius: '2px',
+                boxShadow: isDragging
+                  ? '0 0 16px 4px rgba(244, 208, 63, 0.9)'
+                  : '0 0 8px 2px rgba(244, 208, 63, 0.7)',
+                transform: 'translateX(-3px)',
+                borderRadius: '3px',
               }}
-            />
+            >
+              <div
+                className="absolute -top-1 left-1/2 -translate-x-1/2 w-3 h-3 rounded-full"
+                style={{ background: '#F4D03F', boxShadow: '0 0 6px rgba(244, 208, 63, 0.8)' }}
+              />
+              <div
+                className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-3 h-3 rounded-full"
+                style={{ background: '#F4D03F', boxShadow: '0 0 6px rgba(244, 208, 63, 0.8)' }}
+              />
+            </div>
           )}
         </div>
       </div>
@@ -245,6 +305,18 @@ export default function TimelinePlayer() {
           >
             <Play size={16} />
             继续
+          </button>
+        )}
+
+        {status === 'finished' && (
+          <button
+            onClick={startPlaying}
+            disabled={sorted.length === 0}
+            className="flex items-center gap-1.5 px-5 py-2 rounded-full text-white font-medium transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{ background: '#B85C38' }}
+          >
+            <Play size={16} />
+            重新开始
           </button>
         )}
 

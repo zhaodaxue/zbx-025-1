@@ -1,5 +1,5 @@
 import React from 'react';
-import { useScheduleStore, useScheduleTotalSeconds } from '@/store/scheduler';
+import { useScheduleStore } from '@/store/scheduler';
 import { Settings, AlertTriangle, Clock, Flame, AlertCircle } from 'lucide-react';
 
 const CHINESE_NUMERALS = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
