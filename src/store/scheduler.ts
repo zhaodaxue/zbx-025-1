@@ -10,9 +10,72 @@ import {
   MIN_BURN,
   MAX_BURN,
   MAX_COLUMNS,
+  MIN_GAP,
+  MAX_GAP,
 } from './types';
 
 type Store = ScheduleState & ScheduleActions;
+
+function computePlaybackPosition(
+  sortedColumns: MoxaColumn[],
+  gapMinutes: number,
+  elapsedSeconds: number,
+): {
+  currentColumnIndex: number;
+  currentColumnElapsedSeconds: number;
+  currentGapElapsedSeconds: number;
+  inGap: boolean;
+  isFinished: boolean;
+} {
+  if (sortedColumns.length === 0) {
+    return {
+      currentColumnIndex: 0,
+      currentColumnElapsedSeconds: 0,
+      currentGapElapsedSeconds: 0,
+      inGap: false,
+      isFinished: true,
+    };
+  }
+
+  let remaining = elapsedSeconds;
+
+  for (let i = 0; i < sortedColumns.length; i++) {
+    const burnSeconds = sortedColumns[i].burnMinutes * 60;
+    if (remaining < burnSeconds) {
+      return {
+        currentColumnIndex: i,
+        currentColumnElapsedSeconds: remaining,
+        currentGapElapsedSeconds: 0,
+        inGap: false,
+        isFinished: false,
+      };
+    }
+    remaining -= burnSeconds;
+
+    if (i < sortedColumns.length - 1) {
+      const gapSeconds = gapMinutes * 60;
+      if (remaining < gapSeconds) {
+        return {
+          currentColumnIndex: i,
+          currentColumnElapsedSeconds: burnSeconds,
+          currentGapElapsedSeconds: remaining,
+          inGap: true,
+          isFinished: false,
+        };
+      }
+      remaining -= gapSeconds;
+    }
+  }
+
+  const lastIndex = sortedColumns.length - 1;
+  return {
+    currentColumnIndex: lastIndex,
+    currentColumnElapsedSeconds: sortedColumns[lastIndex].burnMinutes * 60,
+    currentGapElapsedSeconds: 0,
+    inGap: false,
+    isFinished: true,
+  };
+}
 
 function createDefaultColumn(order: number, burnMinutes?: number): MoxaColumn {
   const minutes = burnMinutes ?? Math.round((MIN_BURN + MAX_BURN) / 2);
@@ -60,7 +123,26 @@ export const useScheduleStore = create<Store>((set, get) => ({
     const filtered = state.columns.filter((c) => c.id !== id);
     const reindexed = filtered.map((c, i) => ({ ...c, order: i }));
     const result = recalculateWarnings(reindexed, state.gapMinutes);
-    set({ columns: result.updatedColumns, warnings: result.warnings });
+
+    if (state.status === 'idle') {
+      set({ columns: result.updatedColumns, warnings: result.warnings });
+    } else {
+      const sorted = [...result.updatedColumns].sort((a, b) => a.order - b.order);
+      const totalSeconds = calculateTotalSeconds(result.updatedColumns, state.gapMinutes);
+      const clampedElapsed = Math.min(state.elapsedSeconds, totalSeconds);
+      const pos = computePlaybackPosition(sorted, state.gapMinutes, clampedElapsed);
+
+      set({
+        columns: result.updatedColumns,
+        warnings: result.warnings,
+        currentColumnIndex: pos.currentColumnIndex,
+        currentColumnElapsedSeconds: pos.currentColumnElapsedSeconds,
+        currentGapElapsedSeconds: pos.currentGapElapsedSeconds,
+        inGap: pos.inGap,
+        elapsedSeconds: clampedElapsed,
+        status: pos.isFinished ? 'finished' : state.status,
+      });
+    }
   },
 
   updateBurnTime: (id: string, minutes: number) => {
@@ -70,13 +152,53 @@ export const useScheduleStore = create<Store>((set, get) => ({
       c.id === id ? { ...c, burnMinutes: clamped } : c
     );
     const result = recalculateWarnings(newColumns, state.gapMinutes);
-    set({ columns: result.updatedColumns, warnings: result.warnings });
+
+    if (state.status === 'idle') {
+      set({ columns: result.updatedColumns, warnings: result.warnings });
+    } else {
+      const sorted = [...result.updatedColumns].sort((a, b) => a.order - b.order);
+      const totalSeconds = calculateTotalSeconds(result.updatedColumns, state.gapMinutes);
+      const clampedElapsed = Math.min(state.elapsedSeconds, totalSeconds);
+      const pos = computePlaybackPosition(sorted, state.gapMinutes, clampedElapsed);
+
+      set({
+        columns: result.updatedColumns,
+        warnings: result.warnings,
+        currentColumnIndex: pos.currentColumnIndex,
+        currentColumnElapsedSeconds: pos.currentColumnElapsedSeconds,
+        currentGapElapsedSeconds: pos.currentGapElapsedSeconds,
+        inGap: pos.inGap,
+        elapsedSeconds: clampedElapsed,
+        status: pos.isFinished ? 'finished' : state.status,
+      });
+    }
   },
 
   updateGapMinutes: (minutes: number) => {
     const state = get();
-    const result = recalculateWarnings(state.columns, minutes);
-    set({ gapMinutes: minutes, columns: result.updatedColumns, warnings: result.warnings });
+    const clamped = Math.max(MIN_GAP, Math.min(MAX_GAP, minutes));
+    const result = recalculateWarnings(state.columns, clamped);
+
+    if (state.status === 'idle') {
+      set({ gapMinutes: clamped, columns: result.updatedColumns, warnings: result.warnings });
+    } else {
+      const sorted = [...result.updatedColumns].sort((a, b) => a.order - b.order);
+      const totalSeconds = calculateTotalSeconds(result.updatedColumns, clamped);
+      const clampedElapsed = Math.min(state.elapsedSeconds, totalSeconds);
+      const pos = computePlaybackPosition(sorted, clamped, clampedElapsed);
+
+      set({
+        gapMinutes: clamped,
+        columns: result.updatedColumns,
+        warnings: result.warnings,
+        currentColumnIndex: pos.currentColumnIndex,
+        currentColumnElapsedSeconds: pos.currentColumnElapsedSeconds,
+        currentGapElapsedSeconds: pos.currentGapElapsedSeconds,
+        inGap: pos.inGap,
+        elapsedSeconds: clampedElapsed,
+        status: pos.isFinished ? 'finished' : state.status,
+      });
+    }
   },
 
   reorderColumns: (fromIndex: number, toIndex: number) => {
@@ -87,7 +209,26 @@ export const useScheduleStore = create<Store>((set, get) => ({
     sorted.splice(toIndex, 0, moved);
     const reindexed = sorted.map((c, i) => ({ ...c, order: i }));
     const result = recalculateWarnings(reindexed, state.gapMinutes);
-    set({ columns: result.updatedColumns, warnings: result.warnings });
+
+    if (state.status === 'idle') {
+      set({ columns: result.updatedColumns, warnings: result.warnings });
+    } else {
+      const newSorted = [...result.updatedColumns].sort((a, b) => a.order - b.order);
+      const totalSeconds = calculateTotalSeconds(result.updatedColumns, state.gapMinutes);
+      const clampedElapsed = Math.min(state.elapsedSeconds, totalSeconds);
+      const pos = computePlaybackPosition(newSorted, state.gapMinutes, clampedElapsed);
+
+      set({
+        columns: result.updatedColumns,
+        warnings: result.warnings,
+        currentColumnIndex: pos.currentColumnIndex,
+        currentColumnElapsedSeconds: pos.currentColumnElapsedSeconds,
+        currentGapElapsedSeconds: pos.currentGapElapsedSeconds,
+        inGap: pos.inGap,
+        elapsedSeconds: clampedElapsed,
+        status: pos.isFinished ? 'finished' : state.status,
+      });
+    }
   },
 
   startPlaying: () => {
@@ -139,61 +280,74 @@ export const useScheduleStore = create<Store>((set, get) => ({
     if (state.status !== 'playing') return;
 
     const sorted = [...state.columns].sort((a, b) => a.order - b.order);
-    const effectiveDelta = deltaSeconds * state.playbackSpeed;
-    let newElapsed = state.elapsedSeconds + effectiveDelta;
+    let remainingDelta = deltaSeconds * state.playbackSpeed;
+    let newElapsed = state.elapsedSeconds;
     let newColIndex = state.currentColumnIndex;
-    let newColElapsed = state.currentColumnElapsedSeconds + effectiveDelta;
+    let newColElapsed = state.currentColumnElapsedSeconds;
     let newGapElapsed = state.currentGapElapsedSeconds;
     let newInGap = state.inGap;
+    let finished = false;
 
-    const currentBurnSeconds = sorted[newColIndex].burnMinutes * 60;
+    while (remainingDelta > 0 && !finished) {
+      if (!newInGap) {
+        const currentBurnSeconds = sorted[newColIndex].burnMinutes * 60;
+        const remainingInColumn = currentBurnSeconds - newColElapsed;
 
-    if (!newInGap) {
-      if (newColElapsed >= currentBurnSeconds) {
-        const overflow = newColElapsed - currentBurnSeconds;
-        newColElapsed = currentBurnSeconds;
-
-        if (newColIndex < sorted.length - 1) {
-          newInGap = true;
-          newGapElapsed = overflow;
-          const gapSeconds = state.gapMinutes * 60;
-          if (newGapElapsed >= gapSeconds) {
-            newColIndex++;
-            newColElapsed = newGapElapsed - gapSeconds;
-            newGapElapsed = 0;
-            newInGap = false;
-          }
+        if (remainingDelta < remainingInColumn) {
+          newColElapsed += remainingDelta;
+          newElapsed += remainingDelta;
+          remainingDelta = 0;
         } else {
-          set({
-            status: 'finished',
-            elapsedSeconds: newElapsed,
-            currentColumnIndex: newColIndex,
-            currentColumnElapsedSeconds: currentBurnSeconds,
-            currentGapElapsedSeconds: 0,
-            inGap: false,
-          });
-          return;
+          remainingDelta -= remainingInColumn;
+          newElapsed += remainingInColumn;
+          newColElapsed = currentBurnSeconds;
+
+          if (newColIndex < sorted.length - 1) {
+            newInGap = true;
+            newGapElapsed = 0;
+          } else {
+            finished = true;
+          }
         }
-      }
-    } else {
-      const gapSeconds = state.gapMinutes * 60;
-      newGapElapsed += effectiveDelta;
-      if (newGapElapsed >= gapSeconds) {
-        const overflow = newGapElapsed - gapSeconds;
-        newColIndex++;
-        newColElapsed = overflow;
-        newGapElapsed = 0;
-        newInGap = false;
+      } else {
+        const gapSeconds = state.gapMinutes * 60;
+        const remainingInGap = gapSeconds - newGapElapsed;
+
+        if (remainingDelta < remainingInGap) {
+          newGapElapsed += remainingDelta;
+          newElapsed += remainingDelta;
+          remainingDelta = 0;
+        } else {
+          remainingDelta -= remainingInGap;
+          newElapsed += remainingInGap;
+          newGapElapsed = gapSeconds;
+
+          newColIndex++;
+          newColElapsed = 0;
+          newGapElapsed = 0;
+          newInGap = false;
+        }
       }
     }
 
-    set({
-      elapsedSeconds: newElapsed,
-      currentColumnIndex: newColIndex,
-      currentColumnElapsedSeconds: newColElapsed,
-      currentGapElapsedSeconds: newGapElapsed,
-      inGap: newInGap,
-    });
+    if (finished) {
+      set({
+        status: 'finished',
+        elapsedSeconds: newElapsed,
+        currentColumnIndex: newColIndex,
+        currentColumnElapsedSeconds: sorted[newColIndex].burnMinutes * 60,
+        currentGapElapsedSeconds: 0,
+        inGap: false,
+      });
+    } else {
+      set({
+        elapsedSeconds: newElapsed,
+        currentColumnIndex: newColIndex,
+        currentColumnElapsedSeconds: newColElapsed,
+        currentGapElapsedSeconds: newGapElapsed,
+        inGap: newInGap,
+      });
+    }
   },
 
   setPlaybackSpeed: (speed: number) => {

@@ -11,7 +11,6 @@ export default function ParameterPanel() {
   const warnings = useScheduleStore((s) => s.warnings);
   const updateBurnTime = useScheduleStore((s) => s.updateBurnTime);
   const updateGapMinutes = useScheduleStore((s) => s.updateGapMinutes);
-  const totalSeconds = useScheduleTotalSeconds();
 
   const sorted = [...columns].sort((a, b) => a.order - b.order);
   const isDisabled = status === 'playing';
